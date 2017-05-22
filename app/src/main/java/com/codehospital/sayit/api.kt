@@ -5,6 +5,8 @@ package com.codehospital.sayit
  *
  */
 
+
+import android.util.Log
 import kotlinx.coroutines.experimental.runBlocking
 import okhttp3.*
 import okhttp3.logging.HttpLoggingInterceptor
@@ -12,6 +14,7 @@ import org.slf4j.LoggerFactory
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Retrofit
+import retrofit2.Response
 import retrofit2.converter.scalars.ScalarsConverterFactory
 import retrofit2.http.*
 import retrofit2.http.Headers
@@ -30,8 +33,8 @@ object Platform {
 }
 
 object api {
-    var hard_password: String? = ""
-    var hard_username: String? = ""
+    var hard_password: String? = "newpassword123"
+    var hard_username: String? = "rgaudet@vtexvsi.com"
     var hard_url: String? = "https://eval.nvoq.com:443"
 
     var hard_mic_name: String? = null
@@ -48,7 +51,7 @@ object api {
 
     class HttpAuthInterceptor(private val httpUsername: String, private val httpPassword: String) : Interceptor {
         @Throws(IOException::class)
-        override fun intercept(chain: Interceptor.Chain): Response {
+        override fun intercept(chain: Interceptor.Chain): okhttp3.Response {
             val newRequest = chain
                     .request()
                     .newBuilder()
@@ -102,7 +105,8 @@ object api {
         @DELETE fun deleteUploadedAudio(@Url audioUrl: String): Call<String>
     }
 
-    fun uploadAudio(file: File) {
+    fun uploadAudio(file: File, setStatus: (String) -> Unit, setRetreivedText: (String) -> Unit) {
+//        setStatus("uploadAudio: sending ${file.absolutePath} is ${file.exists()}")
         val mediaType = when (file.extension) {
             "ogg" -> "audio/ogg"
             "wav" -> "audio/x-wav"
@@ -114,38 +118,72 @@ object api {
 
         service().uploadAudio(body).enqueue(object : Callback<String> {
             override fun onFailure(p0: Call<String>?, p1: Throwable?) {
-                logger.error(p1?.message)
+                setStatus("API:"+p1?.message)
             }
 
             override fun onResponse(p0: Call<String>?, response: retrofit2.Response<String>?) {
+                Log.d("onResponse", response?.errorBody().toString())
+                Log.d("onResponse", response?.message())
+                Log.d("onResponse", response?.headers().toString())
                 val audioLocation = response?.headers()?.get("Location")!!
-                logger.info("audioLocation = $audioLocation")
+                setStatus("audioLocation = $audioLocation")
                 val audioFormat = "pcm-16khz"
                 service().getPostLocation1(username.value!!, audioLocation, audioFormat, "owner", "3600").enqueue(object :Callback<ResponseBody>{
                     override fun onFailure(p0: Call<ResponseBody>?, p1: Throwable?) {
                         TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
                     }
 
-                    override fun onResponse(p0: Call<ResponseBody>?, response: retrofit2.Response<ResponseBody>?) {
+                    override fun onResponse(p0: Call<ResponseBody>?, response: Response<ResponseBody>?) {
                         val dictationLocation = response?.headers()?.get("Location")
-                        logger.info("dictationLocation = $dictationLocation")
-                        do {
-                            val done_response = service().get(dictationLocation+"/done").execute()
-                            val done = done_response.body().toBoolean()
-                            logger.info("Done body = ${done_response.body()} and done = $done")
-                            val status_response = service().get(dictationLocation+"/stats").execute()
-                            logger.info("Status body = ${status_response.body()}")
-                        } while (!done)
+                        setStatus("dictationLocation = $dictationLocation")
+                        fun checkIfDone(): Unit {
+                            service().get(dictationLocation+"/done").enqueue(object:Callback<String> {
+                                override fun onFailure(p0: Call<String>?, p1: Throwable?) {
+                                    TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
+                                }
+
+                                override fun onResponse(p0: Call<String>?, done_response: Response<String>?) {
+                                    val done = done_response?.body()?.toBoolean() ?: false
+                                    setStatus("API: Done body = ${done_response?.body()} and done = $done")
+                                    if (done) {
+                                        service().get(dictationLocation+"/text").enqueue(object : Callback<String> {
+                                            override fun onFailure(p0: Call<String>?, p1: Throwable?) {
+                                                TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
+                                            }
+
+                                            override fun onResponse(p0: Call<String>?, text_response: Response<String>?) {
+                                                setStatus("retreived text body is '${text_response?.body()}'")
+                                                text_response?.body()?.let { setRetreivedText(it) }
+                                            }
+                                        })
+
+                                    } else {
+                                        service().get(dictationLocation+"/stats/Status").enqueue(object : Callback<String> {
+                                            override fun onResponse(p0: Call<String>?, status_response: Response<String>?) {
+                                                setStatus("Status: ${status_response?.body()}")
+                                                checkIfDone()
+                                            }
+
+                                            override fun onFailure(p0: Call<String>?, p1: Throwable?) {
+                                                TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
+                                            }
+
+                                        })
+                                    }
+                                }
+                            } )
+
+                        }
+                        checkIfDone()
                         // wait till true
-                        val status_response = service().get(dictationLocation+"/stats/Status").execute()
-                        logger.info("Status body = ${status_response.body()}")
+//                        val status_response = service().get(dictationLocation+"/stats/Status").execute()
+//                        Log.i("API","Status body = ${status_response.body()}")
                         // wait till "succeeded"
-                        val text_response = service().get(dictationLocation+"/text").execute()
-                        logger.info("text body = ${text_response.body()}")
-                        service().deleteUploadedAudio(audioLocation).execute()
-                        val observer_response = service().get(dictationLocation+"/stats/ClientObserverUrl").execute()
-                        val observerLocation = observer_response.body()
-                        service().get(observerLocation+"/deregister").execute()
+
+//                        service().deleteUploadedAudio(audioLocation).execute()
+//                        val observer_response = service().get(dictationLocation+"/stats/ClientObserverUrl").execute()
+//                        val observerLocation = observer_response.body()
+//                        service().get(observerLocation+"/deregister").execute()
                     }
                 })
             }
@@ -155,7 +193,7 @@ object api {
     var send_location = SimpleStringProperty(null)
     fun startSendingAudioFiles(file_extension: String, updateStatus: (String?) -> Unit, appendText: (String?) -> Unit, onFinish: () -> Unit) {
         if (!available) {
-            logger.warn("api is busy with previous request")
+            Log.w("API","api is busy with previous request")
             return
         }
         available = false
@@ -166,14 +204,14 @@ object api {
         }
         service().getPostLocation(username.value!!, true, audioFormat, Random().nextInt()).enqueue(object : Callback<ResponseBody> {
             override fun onFailure(p0: Call<ResponseBody>?, p1: Throwable?) {
-                logger.error(p1?.message)
+                Log.e("API",p1?.message)
                 available = true
             }
 
             override fun onResponse(p0: Call<ResponseBody>?, result: retrofit2.Response<ResponseBody>?) {
                 val location = result?.headers()?.get("Location")
                 send_location.value = location
-                logger.info("location is $location")
+                Log.i("API","location is $location")
                 checkDictationStatus(location, updateStatus, appendText, false, onFinish)
             }
         })
@@ -185,21 +223,23 @@ object api {
         !insider_call && isCheckingDictation && return
         isCheckingDictation = true
         fun onFailure(p1: Throwable?): Unit {
-            logger.error(p1?.message)
+            Log.e("API",p1?.message)
             available = true
             isCheckingDictation = false
         }
         service().get("$location/stats/Status").enqueue(object : Callback<String> {
-            override fun onResponse(p0: Call<String>?, response: retrofit2.Response<String>?) = logger.info("stats/Status => ${response?.message()}")
+            override fun onResponse(p0: Call<String>?, response: retrofit2.Response<String>?) {
+                Log.i("API","stats/Status => ${response?.message()}")
+            }
             override fun onFailure(p0: Call<String>?, p1: Throwable?) = onFailure(p1)
         })
         service().getDictationText("$location/text", "bytes 0-").enqueue(object : Callback<String> {
             override fun onResponse(p0: Call<String>?, result: retrofit2.Response<String>?) {
-                logger.info(result.toString())
+                Log.i("API",result.toString())
                 try {
                     if (result?.code() == 200) {
                         val text = result.body()
-                        logger.info("retreived text is '$text'")
+                        Log.i("API","retreived text is '$text'")
                         if (!text.isNullOrEmpty()) {
                             update_text(text!!)
                         }
@@ -227,13 +267,13 @@ object api {
                             checkDictationStatus(location, update_status, update_text, true, onFinish)
                         }
                     } else {
-                        logger.error("ERROR: ${result.toString()}")
+                        Log.e("API","ERROR: ${result.toString()}")
                         Thread.sleep(1000)
                         checkDictationStatus(location, update_status, update_text, true, onFinish)
                     }
                 } catch (ex: Exception) {
                     ex.printStackTrace()
-                    logger.error(ex.message)
+                    Log.e("API",ex.message)
                     Thread.sleep(1000)
                     checkDictationStatus(location, update_status, update_text, true, onFinish)
                 }
@@ -265,7 +305,7 @@ object api {
 
         service().sendAudioFile("$location/audio", body).enqueue(object : Callback<String> {
             override fun onFailure(p0: Call<String>?, p1: Throwable?) {
-                logger.error(p1?.message)
+                Log.e("API",p1?.message)
                 available = true
             }
 
@@ -276,7 +316,7 @@ object api {
 //          }
 //
 //          override fun onFailure(p0: Call<String>?, p1: Throwable?) {
-//            logger.error(p1?.message)
+//            Log.e("API",p1?.message)
 //            available = true
 //          }
 //        })
@@ -287,7 +327,7 @@ object api {
     fun sendAudioFile(files: Array<File>, update_status: (String?) -> Unit, update_text: (String?) -> Unit, onFinish: () -> Unit) {
         files.isEmpty() && return
         if (!available) {
-            logger.warn("api is busy with previous request")
+            Log.w("API","api is busy with previous request")
             return
         }
         available = false
@@ -307,7 +347,7 @@ object api {
         }
         var file_index = 0
         fun sendFile(location: String, file: File) {
-            logger.info("file chosen = " + file.absolutePath)
+            Log.i("API","file chosen = " + file.absolutePath)
             Platform.runLater {
                 if (files.size > 1)
                     update_status("sending ${file_index + 1} of ${files.size} files to server, please wait")
@@ -334,7 +374,7 @@ object api {
                         }
 
                         override fun onFailure(p0: Call<String>?, p1: Throwable?) {
-                            logger.error(p1?.message)
+                            Log.e("API",p1?.message)
                             beforeEnd()
                         }
                     })
@@ -342,7 +382,7 @@ object api {
                 }
 
                 override fun onFailure(p0: Call<String>?, p1: Throwable?) {
-                    logger.error(p1?.message)
+                    Log.e("API",p1?.message)
                     // retry
                     sendFile(location, files[file_index])
                 }
@@ -353,13 +393,13 @@ object api {
                 if (result?.isSuccessful!!) {
                     val location = result.headers()?.get("Location")
                     if (location != null) {
-                        logger.info("before sendFile")
+                        Log.i("API","before sendFile")
                         sendFile(location = location, file = files.first())
-                        logger.info("after sendFile")
+                        Log.i("API","after sendFile")
                         checkDictationStatus(location, update_status, update_text, false, onFinish)
                     }
                 } else {
-                    logger.error(result.errorBody().string())
+                    Log.e("API",result.errorBody().string())
                     beforeEnd()
                     Platform.runLater { update_status("Unable to get valid location") }
                 }
@@ -367,8 +407,8 @@ object api {
 
             override fun onFailure(p0: Call<ResponseBody>?, p1: Throwable?) {
                 p1?.printStackTrace()
-                logger.error(p1?.stackTrace?.joinToString(" - "))
-                logger.error(p1?.message)
+                Log.e("API",p1?.stackTrace?.joinToString(" - "))
+                Log.e("API",p1?.message)
                 beforeEnd()
             }
         })
@@ -382,7 +422,7 @@ object api {
                 username.set(hard_username)
                 password.set(hard_password)
             }
-            logger.info("using ${username.value} and ${password.value}")
+            Log.i("API","using ${username.value} and ${password.value}")
             val loggingInterceptor = HttpLoggingInterceptor()
             loggingInterceptor.level = HttpLoggingInterceptor.Level.HEADERS
             val client = OkHttpClient.Builder()
@@ -401,7 +441,7 @@ object api {
     }
 
     fun login(user: String, pass: String, onSuccess: () -> Unit, onFailure: () -> Unit) {
-        logger.info("login as $user")
+        Log.i("API","login as $user")
         username.set(user)
         password.set(pass)
         service = null
@@ -419,8 +459,8 @@ object api {
                 } else {
                     Platform.runLater { onFailure() }
                 }
-                logger.debug("login attempt was " + x.message()) // Ok // Unauthorized
-                logger.debug("response body = " + x.body()) // dictation matching // null
+                Log.d("API","login attempt was " + x.message()) // Ok // Unauthorized
+                Log.d("API","response body = " + x.body()) // dictation matching // null
             }
         })
     }
@@ -428,9 +468,9 @@ object api {
     fun change_password(new_password: String, onSuccess: () -> Unit, onFailure: () -> Unit) {
         service().changePassword(username.value!!, new_password).enqueue(object : Callback<String> {
             override fun onResponse(p0: Call<String>?, resp: retrofit2.Response<String>?) {
-                logger.info("change password attempt was " + resp?.message()) // Ok // Unauthorized
-                logger.debug("response body = " + resp?.body()) // dictation matching // null
-                logger.warn("http header code = " + resp?.code()) // 200 // 401
+                Log.i("API","change password attempt was " + resp?.message()) // Ok // Unauthorized
+                Log.d("API","response body = " + resp?.body()) // dictation matching // null
+                Log.w("API","http header code = " + resp?.code()) // 200 // 401
                 if (resp?.code() == 200) {
                     Platform.runLater { onSuccess() }
                 } else {

@@ -7,6 +7,7 @@
     android:paddingBottom="@dimen/activity_vertical_margin"
     android:paddingLeft="@dimen/activity_horizontal_margin"
     android:paddingRight="@dimen/activity_horizontal_margin"
+
     android:paddingTop="@dimen/activity_vertical_margin"
     tools:context="com.codehospital.sayit.LoginActivity">
 
@@ -21,14 +22,17 @@
 
     <ScrollView
         android:id="@+id/login_form"
+        android:isScrollContainer="false"
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
+        android:layout_height="match_parent"
+        android:fillViewport="false">
 
         <LinearLayout
             android:id="@+id/email_login_form"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical">
+            android:orientation="vertical"
+            android:weightSum="1">
 
             <android.support.design.widget.TextInputLayout
                 android:layout_width="match_parent"
@@ -38,11 +42,11 @@
                 android:id="@+id/email"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:enabled="false"
                 android:hint="@string/prompt_email"
                 android:inputType="textEmailAddress"
                 android:maxLines="1"
-                android:singleLine="true"
-                android:text="rgaudet@vtexvsi.com" />
+                android:text="@string/userEmail" />
 
             </android.support.design.widget.TextInputLayout>
 
@@ -52,6 +56,7 @@
 
             <EditText
                 android:id="@+id/password"
+                android:enabled="false"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:hint="@string/prompt_password"
@@ -60,8 +65,7 @@
                 android:imeOptions="actionUnspecified"
                 android:inputType="textPassword"
                 android:maxLines="1"
-                android:singleLine="true"
-                android:text="newpassword123" />
+                android:text="@string/password" />
 
             </android.support.design.widget.TextInputLayout>
 
@@ -74,6 +78,24 @@
                 android:text="@string/action_sign_in"
                 android:textStyle="bold"/>
 
+            <ToggleButton
+                android:id="@+id/record_button"
+                style="?android:textAppearanceSmall"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:textOff="@string/action_record"
+                android:textOn="@string/action_recording"
+                android:textStyle="bold"/>
+            <TextView
+                android:id="@+id/retrieved_text"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_weight="4.63" />
+            <TextView
+                android:id="@+id/status_bar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
         </LinearLayout>
     </ScrollView>
 </LinearLayout>

@@ -1,41 +1,43 @@
 package com.codehospital.sayit
 
+import android.Manifest
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.annotation.TargetApi
 import android.content.pm.PackageManager
-import android.support.design.widget.Snackbar
 import android.support.v7.app.AppCompatActivity
-import android.app.LoaderManager.LoaderCallbacks
-
-import android.content.CursorLoader
-import android.content.Loader
-import android.database.Cursor
-import android.net.Uri
-import android.os.AsyncTask
 
 import android.os.Build
 import android.os.Bundle
-import android.provider.ContactsContract
 import android.text.TextUtils
-import android.view.KeyEvent
 import android.view.View
-import android.view.View.OnClickListener
 import android.view.inputmethod.EditorInfo
-import java.util.ArrayList
 
-import android.Manifest.permission.READ_CONTACTS
-import android.os.Message
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
+import android.support.v4.app.ActivityCompat
+import android.util.Log
 import android.widget.*
+import java.io.*
 
 /**
  * A login screen that offers login via email/password.
  */
-class LoginActivity : AppCompatActivity(), LoaderCallbacks<Cursor> {
+class LoginActivity : AppCompatActivity() {
     /**
      * Keep track of the login task to ensure we can cancel it if requested.
      */
-    private var mAuthTask = null
+
+
+    val LOG_TAG = "AudioRecordTest"
+    val REQUEST_RECORD_AUDIO_PERMISSION = 200
+
+    var isRecording = false
+
+    // Requesting permission to RECORD_AUDIO
+    var permissionToRecordAccepted = false
+    private val permissions = arrayOf(Manifest.permission.RECORD_AUDIO)
 
     // UI references.
     private var mEmailView: AutoCompleteTextView? = null
@@ -43,51 +45,89 @@ class LoginActivity : AppCompatActivity(), LoaderCallbacks<Cursor> {
     private var mProgressView: View? = null
     private var mLoginFormView: View? = null
 
+    fun getResourceAsFile(resourcePath: String): File? {
+        try {
+            val assetManager = applicationContext.resources.assets // Use AsstManager to load SVM detector parameters into memory
+            val fin = assetManager.open(resourcePath)            // Load parameter file to SVM detector
+            val tempFile = File.createTempFile(fin.hashCode().toString(), resourcePath.split('.').last())
+            tempFile.deleteOnExit()
+
+            FileOutputStream(tempFile).use { out ->
+                //copy stream
+                val buffer = ByteArray(1024)
+                var bytesRead: Int
+                bytesRead = fin.read(buffer)
+                while (bytesRead != -1) {
+                    out.write(buffer, 0, bytesRead)
+                    bytesRead = fin.read(buffer)
+                }
+            }
+            return tempFile
+        } catch (e: IOException) {
+            e.printStackTrace()
+            return null
+        }
+
+    }
+
+    private var retreivedText: TextView? = null
+    private var statusText: TextView?   = null
+    val setRetreivedText = fun(text : String): Unit {
+        showProgress(false)
+        retreivedText?.text = text
+    }
+    val setStatus = fun(text : String): Unit {
+        showProgress(false)
+        statusText?.text = text
+        Log.i("Status", text)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_login)
+        ActivityCompat.requestPermissions(this, permissions, REQUEST_RECORD_AUDIO_PERMISSION)
+
         // Set up the login form.
         mEmailView = findViewById(R.id.email) as AutoCompleteTextView
-        populateAutoComplete()
 
         mPasswordView = findViewById(R.id.password) as EditText
-        mPasswordView!!.setOnEditorActionListener(TextView.OnEditorActionListener { textView, id, keyEvent ->
+        mPasswordView!!.setOnEditorActionListener(TextView.OnEditorActionListener { _, id, _ ->
             if (id == R.id.login || id == EditorInfo.IME_NULL) {
                 attemptLogin()
                 return@OnEditorActionListener true
             }
             false
         })
-
+        retreivedText = findViewById(R.id.retrieved_text) as TextView
+        statusText = findViewById(R.id.status_bar) as TextView
         val mEmailSignInButton = findViewById(R.id.email_sign_in_button) as Button
-        mEmailSignInButton.setOnClickListener { attemptLogin() }
+        mEmailSignInButton.setOnClickListener {
+//            attemptLogin()
+//            val file = File(javaClass.classLoader.getResource("raw/extended_service.wav").file)
+            val file = getResourceAsFile("raw/extended_service.wav")
+            if (file != null) {
+                showProgress(true)
+                api.uploadAudio(file, setStatus, setRetreivedText)
+            } else {
+                Log.e(LOG_TAG,"resource not found")
+            }
+        }
+
+        val recordButton = findViewById(R.id.record_button) as ToggleButton
+        recordButton.setOnCheckedChangeListener { _, started ->
+            if (started) {
+                // start recording
+                startRecording()
+            } else {
+                // stop recording
+                stopRecording()
+                // send audio file
+
+            }
+        }
 
         mLoginFormView = findViewById(R.id.login_form)
         mProgressView = findViewById(R.id.login_progress)
-    }
-
-    private fun populateAutoComplete() {
-        if (!mayRequestContacts()) {
-            return
-        }
-
-        loaderManager.initLoader(0, null, this)
-    }
-
-    private fun mayRequestContacts(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            return true
-        }
-        if (checkSelfPermission(READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) {
-            return true
-        }
-        if (shouldShowRequestPermissionRationale(READ_CONTACTS)) {
-            Snackbar.make(mEmailView!!, R.string.permission_rationale, Snackbar.LENGTH_INDEFINITE)
-                    .setAction(android.R.string.ok) { requestPermissions(arrayOf(READ_CONTACTS), REQUEST_READ_CONTACTS) }
-        } else {
-            requestPermissions(arrayOf(READ_CONTACTS), REQUEST_READ_CONTACTS)
-        }
-        return false
     }
 
     /**
@@ -95,13 +135,79 @@ class LoginActivity : AppCompatActivity(), LoaderCallbacks<Cursor> {
      */
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>,
                                             grantResults: IntArray) {
-        if (requestCode == REQUEST_READ_CONTACTS) {
-            if (grantResults.size == 1 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                populateAutoComplete()
-            }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_RECORD_AUDIO_PERMISSION) {
+            permissionToRecordAccepted = grantResults[0] == PackageManager.PERMISSION_GRANTED
         }
+        if (!permissionToRecordAccepted) finish()
     }
 
+    private val frequency = 16000
+    val channelConfiguration = AudioFormat.CHANNEL_IN_MONO
+    val EncodingBitRate = AudioFormat.ENCODING_PCM_16BIT
+
+    private fun startRecording() {
+        val aRecorder = AudioRecord(
+                MediaRecorder.AudioSource.MIC,
+                frequency,channelConfiguration,
+                EncodingBitRate,
+                AudioRecord.getMinBufferSize(frequency, channelConfiguration, EncodingBitRate))
+        val aFileName = externalCacheDir.absolutePath + "/audiorecordtest.raw"
+        isRecording = true
+        val recBufSize = 1024
+
+        aRecorder.startRecording()
+        fun writeAudioDataToFile(): Unit {
+            val data = ByteArray(recBufSize)
+            var os: FileOutputStream? = null
+
+            try {
+                os = FileOutputStream(aFileName)
+            } catch (e: FileNotFoundException) {
+                // TODO Auto-generated catch block
+                e.printStackTrace()
+            }
+
+
+            if (null != os) {
+                while (isRecording) {
+                    val read = aRecorder.read(data, 0, recBufSize)
+                    Log.i("isRecording", ".")
+                    if (AudioRecord.ERROR_INVALID_OPERATION != read) {
+                        try {
+                            os.write(data)
+                        } catch (e: IOException) {
+                            e.printStackTrace()
+                        }
+
+                    }
+                }
+
+                try {
+                    os.close()
+                    val wFilename = externalCacheDir.absolutePath + "/audiorecordtest.wav"
+                    Wave.copyTmpfileToWavfile(aFileName, wFilename, frequency.toLong(), 1024)
+                    aRecorder.stop()
+                    aRecorder.release()
+                    api.uploadAudio(File(wFilename), setStatus, setRetreivedText)
+
+                } catch (e: IOException) {
+                    e.printStackTrace()
+                }
+
+            }
+        }
+//        recordingThread =
+                Thread(Runnable {
+            writeAudioDataToFile()
+        }, "AudioRecorder Thread").start()
+//        recordingThread?.start()
+    }
+
+    private fun stopRecording() {
+        isRecording = false
+        showProgress(true)
+    }
 
     /**
      * Attempts to sign in or register the account specified by the login form.
@@ -166,7 +272,7 @@ class LoginActivity : AppCompatActivity(), LoaderCallbacks<Cursor> {
 
     private fun isEmailValid(email: String): Boolean {
         //TODO: Replace this with your own logic
-        val e : CharSequence = email;
+        val e : CharSequence = email
         return e.contains("@")
     }
 
@@ -209,66 +315,11 @@ class LoginActivity : AppCompatActivity(), LoaderCallbacks<Cursor> {
         }
     }
 
-    override fun onCreateLoader(i: Int, bundle: Bundle): Loader<Cursor> {
-        return CursorLoader(this,
-                // Retrieve data rows for the device user's 'profile' contact.
-                Uri.withAppendedPath(ContactsContract.Profile.CONTENT_URI,
-                        ContactsContract.Contacts.Data.CONTENT_DIRECTORY), ProfileQuery.PROJECTION,
-
-                // Select only email addresses.
-                ContactsContract.Contacts.Data.MIMETYPE + " = ?", arrayOf(ContactsContract.CommonDataKinds.Email
-                .CONTENT_ITEM_TYPE),
-
-                // Show primary email addresses first. Note that there won't be
-                // a primary email address if the user hasn't specified one.
-                ContactsContract.Contacts.Data.IS_PRIMARY + " DESC")
-    }
-
-    override fun onLoadFinished(cursorLoader: Loader<Cursor>, cursor: Cursor) {
-        val emails = ArrayList<String>()
-        cursor.moveToFirst()
-        while (!cursor.isAfterLast) {
-            emails.add(cursor.getString(ProfileQuery.ADDRESS))
-            cursor.moveToNext()
-        }
-
-        addEmailsToAutoComplete(emails)
-    }
-
-    override fun onLoaderReset(cursorLoader: Loader<Cursor>) {
-
-    }
-
-    private interface ProfileQuery {
-        companion object {
-            val PROJECTION = arrayOf(ContactsContract.CommonDataKinds.Email.ADDRESS, ContactsContract.CommonDataKinds.Email.IS_PRIMARY)
-
-            val ADDRESS = 0
-            val IS_PRIMARY = 1
-        }
-    }
-
-
-    private fun addEmailsToAutoComplete(emailAddressCollection: List<String>) {
-        //Create adapter to tell the AutoCompleteTextView what to show in its dropdown list.
-        val adapter = ArrayAdapter(this@LoginActivity,
-                android.R.layout.simple_dropdown_item_1line, emailAddressCollection)
-
-        mEmailView!!.setAdapter(adapter)
-    }
-
     /**
      * Represents an asynchronous login/registration task used to authenticate
      * the user.
      */
 
-    companion object {
-
-        /**
-         * Id to identity READ_CONTACTS permission request.
-         */
-        private val REQUEST_READ_CONTACTS = 0
-
-    }
+    companion object
 }
 
