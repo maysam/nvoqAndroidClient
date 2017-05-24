@@ -9,7 +9,7 @@
     android:paddingRight="@dimen/activity_horizontal_margin"
 
     android:paddingTop="@dimen/activity_vertical_margin"
-    tools:context="com.codehospital.sayit.LoginActivity">
+    tools:context="com.codehospital.sayit.RecorderActivity">
 
     <!-- Login progress -->
     <ProgressBar
@@ -87,6 +87,19 @@
                 android:textOff="@string/action_record"
                 android:textOn="@string/action_recording"
                 android:textStyle="bold"/>
+
+            <Button
+                android:text="Play"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:id="@+id/play_button" />
+
+            <Button
+                android:text="Retry"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:id="@+id/retry_button" />
+
             <TextView
                 android:id="@+id/retrieved_text"
                 android:layout_width="match_parent"

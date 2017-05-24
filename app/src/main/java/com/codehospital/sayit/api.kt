@@ -6,15 +6,16 @@ package com.codehospital.sayit
  */
 
 
+import android.content.Context
 import android.util.Log
+import android.widget.Toast
 import kotlinx.coroutines.experimental.runBlocking
 import okhttp3.*
 import okhttp3.logging.HttpLoggingInterceptor
-import org.slf4j.LoggerFactory
 import retrofit2.Call
 import retrofit2.Callback
-import retrofit2.Retrofit
 import retrofit2.Response
+import retrofit2.Retrofit
 import retrofit2.converter.scalars.ScalarsConverterFactory
 import retrofit2.http.*
 import retrofit2.http.Headers
@@ -37,12 +38,6 @@ object api {
     var hard_username: String? = "rgaudet@vtexvsi.com"
     var hard_url: String? = "https://eval.nvoq.com:443"
 
-    var hard_mic_name: String? = null
-    var hard_mic_description: String? = null
-    var hard_mic_vendor: String? = null
-    var hard_mic_version: String? = null
-
-    private val logger = LoggerFactory.getLogger(this.javaClass)
     private var available = true
     var loggedIn : SimpleBooleanProperty = SimpleBooleanProperty(false)
     val username = SimpleStringProperty(null)
@@ -105,8 +100,21 @@ object api {
         @DELETE fun deleteUploadedAudio(@Url audioUrl: String): Call<String>
     }
 
-    fun uploadAudio(file: File, setStatus: (String) -> Unit, setRetreivedText: (String) -> Unit) {
-//        setStatus("uploadAudio: sending ${file.absolutePath} is ${file.exists()}")
+    fun uploadAudio(context: Context, file: File, setStatus: (String) -> Unit, setRetreivedText: (String) -> Unit) {
+        if (!available) {
+            Log.w("API","api is busy with previous request")
+            Thread {
+                Toast.makeText(context, "api is busy with previous request", Toast.LENGTH_SHORT).show()
+            }.start()
+            return
+        }
+        available = false
+        abstract class notFailingCallback<T> : Callback<T> {
+            override fun onFailure(p0: Call<T>?, p1: Throwable?) {
+                setStatus("failed: "+p1?.message)
+                available = true
+            }
+        }
         val mediaType = when (file.extension) {
             "ogg" -> "audio/ogg"
             "wav" -> "audio/x-wav"
@@ -116,11 +124,7 @@ object api {
         val requestFile = RequestBody.create(MediaType.parse(mediaType), file)
         val body = MultipartBody.Part.createFormData("data-binary", file.name, requestFile)
 
-        service().uploadAudio(body).enqueue(object : Callback<String> {
-            override fun onFailure(p0: Call<String>?, p1: Throwable?) {
-                setStatus("API:"+p1?.message)
-            }
-
+        service().uploadAudio(body).enqueue(object : notFailingCallback<String>() {
             override fun onResponse(p0: Call<String>?, response: retrofit2.Response<String>?) {
                 Log.d("onResponse", response?.errorBody().toString())
                 Log.d("onResponse", response?.message())
@@ -128,46 +132,35 @@ object api {
                 val audioLocation = response?.headers()?.get("Location")!!
                 setStatus("audioLocation = $audioLocation")
                 val audioFormat = "pcm-16khz"
-                service().getPostLocation1(username.value!!, audioLocation, audioFormat, "owner", "3600").enqueue(object :Callback<ResponseBody>{
-                    override fun onFailure(p0: Call<ResponseBody>?, p1: Throwable?) {
-                        TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
-                    }
-
+                service().getPostLocation1(username.value!!, audioLocation, audioFormat, "owner", "3600").enqueue(object : notFailingCallback<ResponseBody>() {
                     override fun onResponse(p0: Call<ResponseBody>?, response: Response<ResponseBody>?) {
                         val dictationLocation = response?.headers()?.get("Location")
                         setStatus("dictationLocation = $dictationLocation")
                         fun checkIfDone(): Unit {
-                            service().get(dictationLocation+"/done").enqueue(object:Callback<String> {
-                                override fun onFailure(p0: Call<String>?, p1: Throwable?) {
-                                    TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
-                                }
-
+                            service().get(dictationLocation+"/done").enqueue(object: notFailingCallback<String>() {
                                 override fun onResponse(p0: Call<String>?, done_response: Response<String>?) {
                                     val done = done_response?.body()?.toBoolean() ?: false
                                     setStatus("API: Done body = ${done_response?.body()} and done = $done")
-                                    if (done) {
-                                        service().get(dictationLocation+"/text").enqueue(object : Callback<String> {
-                                            override fun onFailure(p0: Call<String>?, p1: Throwable?) {
-                                                TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
-                                            }
-
-                                            override fun onResponse(p0: Call<String>?, text_response: Response<String>?) {
-                                                setStatus("retreived text body is '${text_response?.body()}'")
-                                                text_response?.body()?.let { setRetreivedText(it) }
-                                            }
-                                        })
-
-                                    } else {
-                                        service().get(dictationLocation+"/stats/Status").enqueue(object : Callback<String> {
+                                    if (done) service().get(dictationLocation+"/text").enqueue(object : notFailingCallback<String>() {
+                                        override fun onResponse(p0: Call<String>?, text_response: Response<String>?) {
+                                            setStatus("retreived text body is '${text_response?.body()}'")
+                                            text_response?.body()?.let { setRetreivedText(it) }
+                                            Thread {
+                                                val status_response = service().get(dictationLocation + "/stats/Status").execute()
+                                                Log.i("API", "Status body = ${status_response?.body()}")
+                                                service().deleteUploadedAudio(audioLocation).execute()
+                                                val observer_response = service().get(dictationLocation + "/stats/ClientObserverUrl").execute()
+                                                val observerLocation = observer_response.body()
+                                                service().get(observerLocation + "/deregister").execute()
+                                                available = true
+                                            }.start()
+                                        }
+                                    }) else {
+                                        service().get(dictationLocation+"/stats/Status").enqueue(object : notFailingCallback<String>() {
                                             override fun onResponse(p0: Call<String>?, status_response: Response<String>?) {
                                                 setStatus("Status: ${status_response?.body()}")
                                                 checkIfDone()
                                             }
-
-                                            override fun onFailure(p0: Call<String>?, p1: Throwable?) {
-                                                TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
-                                            }
-
                                         })
                                     }
                                 }
@@ -175,15 +168,6 @@ object api {
 
                         }
                         checkIfDone()
-                        // wait till true
-//                        val status_response = service().get(dictationLocation+"/stats/Status").execute()
-//                        Log.i("API","Status body = ${status_response.body()}")
-                        // wait till "succeeded"
-
-//                        service().deleteUploadedAudio(audioLocation).execute()
-//                        val observer_response = service().get(dictationLocation+"/stats/ClientObserverUrl").execute()
-//                        val observerLocation = observer_response.body()
-//                        service().get(observerLocation+"/deregister").execute()
                     }
                 })
             }

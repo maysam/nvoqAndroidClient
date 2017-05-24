@@ -5,6 +5,7 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.annotation.TargetApi
 import android.content.pm.PackageManager
+import android.media.*
 import android.support.v7.app.AppCompatActivity
 
 import android.os.Build
@@ -13,23 +14,22 @@ import android.text.TextUtils
 import android.view.View
 import android.view.inputmethod.EditorInfo
 
-import android.media.AudioFormat
-import android.media.AudioRecord
-import android.media.MediaRecorder
+import android.net.Uri
 import android.support.v4.app.ActivityCompat
 import android.util.Log
 import android.widget.*
+import android.widget.Toast.LENGTH_LONG
 import java.io.*
 
 /**
  * A login screen that offers login via email/password.
  */
-class LoginActivity : AppCompatActivity() {
+class RecorderActivity : AppCompatActivity() {
     /**
      * Keep track of the login task to ensure we can cancel it if requested.
      */
 
-
+    var waveFilename: String? = null
     val LOG_TAG = "AudioRecordTest"
     val REQUEST_RECORD_AUDIO_PERMISSION = 200
 
@@ -71,12 +71,12 @@ class LoginActivity : AppCompatActivity() {
     }
 
     private var retreivedText: TextView? = null
-    private var statusText: TextView?   = null
-    val setRetreivedText = fun(text : String): Unit {
+    private var statusText: TextView? = null
+    val setRetreivedText = fun(text: String): Unit {
         showProgress(false)
         retreivedText?.text = text
     }
-    val setStatus = fun(text : String): Unit {
+    val setStatus = fun(text: String): Unit {
         showProgress(false)
         statusText?.text = text
         Log.i("Status", text)
@@ -84,7 +84,7 @@ class LoginActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_login)
+        setContentView(R.layout.recorder_activity)
         ActivityCompat.requestPermissions(this, permissions, REQUEST_RECORD_AUDIO_PERMISSION)
 
         // Set up the login form.
@@ -102,14 +102,28 @@ class LoginActivity : AppCompatActivity() {
         statusText = findViewById(R.id.status_bar) as TextView
         val mEmailSignInButton = findViewById(R.id.email_sign_in_button) as Button
         mEmailSignInButton.setOnClickListener {
-//            attemptLogin()
-//            val file = File(javaClass.classLoader.getResource("raw/extended_service.wav").file)
+            //            attemptLogin()
             val file = getResourceAsFile("raw/extended_service.wav")
             if (file != null) {
                 showProgress(true)
-                api.uploadAudio(file, setStatus, setRetreivedText)
-            } else {
-                Log.e(LOG_TAG,"resource not found")
+                api.uploadAudio(applicationContext, file, setStatus, setRetreivedText)
+            }
+        }
+
+        val retryButton = findViewById(R.id.retry_button) as Button
+        retryButton.setOnClickListener {
+            if (waveFilename != null)
+                api.uploadAudio(applicationContext, File(waveFilename), setStatus, setRetreivedText)
+        }
+
+        val playButton = findViewById(R.id.play_button) as Button
+        playButton.setOnClickListener {
+            if (waveFilename != null) {
+                with(MediaPlayer()) {
+                    setDataSource(waveFilename)
+                    prepare()
+                    start()
+                }
             }
         }
 
@@ -147,15 +161,20 @@ class LoginActivity : AppCompatActivity() {
     val EncodingBitRate = AudioFormat.ENCODING_PCM_16BIT
 
     private fun startRecording() {
+        val bitRate = AudioRecord.getMinBufferSize(frequency, channelConfiguration, EncodingBitRate)
+        if (bitRate <= 0) {
+            Toast.makeText(applicationContext, "bit rate not supported", LENGTH_LONG).show()
+            return
+        }
         val aRecorder = AudioRecord(
                 MediaRecorder.AudioSource.MIC,
-                frequency,channelConfiguration,
+                frequency, channelConfiguration,
                 EncodingBitRate,
-                AudioRecord.getMinBufferSize(frequency, channelConfiguration, EncodingBitRate))
+                bitRate)
         val aFileName = externalCacheDir.absolutePath + "/audiorecordtest.raw"
         isRecording = true
         val recBufSize = 1024
-
+        Log.i(LOG_TAG, "bitrate is $bitRate")
         aRecorder.startRecording()
         fun writeAudioDataToFile(): Unit {
             val data = ByteArray(recBufSize)
@@ -172,25 +191,22 @@ class LoginActivity : AppCompatActivity() {
             if (null != os) {
                 while (isRecording) {
                     val read = aRecorder.read(data, 0, recBufSize)
-                    Log.i("isRecording", ".")
                     if (AudioRecord.ERROR_INVALID_OPERATION != read) {
                         try {
                             os.write(data)
                         } catch (e: IOException) {
                             e.printStackTrace()
                         }
-
                     }
                 }
 
                 try {
                     os.close()
-                    val wFilename = externalCacheDir.absolutePath + "/audiorecordtest.wav"
-                    Wave.copyTmpfileToWavfile(aFileName, wFilename, frequency.toLong(), 1024)
+                    waveFilename = externalCacheDir.absolutePath + "/audiorecordtest.wav"
+                    Wave.copyTmpfileToWavfile(aFileName, waveFilename, frequency.toLong(), 1024)
                     aRecorder.stop()
                     aRecorder.release()
-                    api.uploadAudio(File(wFilename), setStatus, setRetreivedText)
-
+                    api.uploadAudio(applicationContext, File(waveFilename), setStatus, setRetreivedText)
                 } catch (e: IOException) {
                     e.printStackTrace()
                 }
@@ -198,7 +214,7 @@ class LoginActivity : AppCompatActivity() {
             }
         }
 //        recordingThread =
-                Thread(Runnable {
+        Thread(Runnable {
             writeAudioDataToFile()
         }, "AudioRecorder Thread").start()
 //        recordingThread?.start()
@@ -272,7 +288,7 @@ class LoginActivity : AppCompatActivity() {
 
     private fun isEmailValid(email: String): Boolean {
         //TODO: Replace this with your own logic
-        val e : CharSequence = email
+        val e: CharSequence = email
         return e.contains("@")
     }
 
@@ -314,12 +330,5 @@ class LoginActivity : AppCompatActivity() {
             mLoginFormView!!.visibility = if (show) View.GONE else View.VISIBLE
         }
     }
-
-    /**
-     * Represents an asynchronous login/registration task used to authenticate
-     * the user.
-     */
-
-    companion object
 }
 
