@@ -93,9 +93,8 @@ object api {
         @POST fun post(@Url url: String): Call<String>
 
         @Headers("Content-Type:audio/x-wav")
-        @Multipart
         @POST("SCFileserver/audio")
-        fun uploadAudio(@Part file: MultipartBody.Part): Call<String>
+        fun uploadAudio(@Body file: RequestBody): Call<String>
         //    @DELETE("matchingwebservice/form") fun deleteUploadedAudio(@Url audioUrl: String): Call<String>
         @DELETE fun deleteUploadedAudio(@Url audioUrl: String): Call<String>
     }
@@ -122,9 +121,7 @@ object api {
         }
         // create RequestBody instance from file
         val requestFile = RequestBody.create(MediaType.parse(mediaType), file)
-        val body = MultipartBody.Part.createFormData("data-binary", file.name, requestFile)
-
-        service().uploadAudio(body).enqueue(object : notFailingCallback<String>() {
+        service().uploadAudio(requestFile).enqueue(object : notFailingCallback<String>() {
             override fun onResponse(p0: Call<String>?, response: retrofit2.Response<String>?) {
                 Log.d("onResponse", response?.errorBody().toString())
                 Log.d("onResponse", response?.message())
